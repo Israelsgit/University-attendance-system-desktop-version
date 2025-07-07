@@ -891,9 +891,13 @@ class ModernAttendanceSystem:
             tk.Label(stats_frame, text=stats_text, bg=self.colors['surface'], fg=self.colors['text'],
                     font=('Segoe UI', 10, 'bold')).pack(pady=10)
             
-            # Create modern treeview
-            tree = ttk.Treeview(content, columns=("Name", "Registration Date", "Samples", "Last Updated"), 
-                               show="headings", style='Modern.Treeview', height=18)
+            # Create a frame for the treeview and scrollbar
+            treeview_frame = tk.Frame(content, bg=self.colors['dark'])
+            treeview_frame.pack(fill='both', expand=True)
+
+            # Create modern treeview (enable multi-select)
+            tree = ttk.Treeview(treeview_frame, columns=("Name", "Registration Date", "Samples", "Last Updated"), 
+                               show="headings", style='Modern.Treeview', height=18, selectmode='extended')
             tree.heading("Name", text="👤 Student Name")
             tree.heading("Registration Date", text="📅 Registration Date")
             tree.heading("Samples", text="🎯 Samples")
@@ -906,10 +910,10 @@ class ModernAttendanceSystem:
             tree.column("Last Updated", width=150)
             
             # Modern scrollbar
-            scrollbar = ttk.Scrollbar(content, orient="vertical", command=tree.yview)
+            scrollbar = ttk.Scrollbar(treeview_frame, orient="vertical", command=tree.yview)
             tree.configure(yscrollcommand=scrollbar.set)
             
-            # Pack widgets
+            # Pack treeview and scrollbar in treeview_frame
             tree.pack(side="left", fill="both", expand=True)
             scrollbar.pack(side="right", fill="y")
             
@@ -927,7 +931,7 @@ class ModernAttendanceSystem:
             tree.tag_configure('evenrow', background=self.colors['surface'])
             tree.tag_configure('oddrow', background=self.colors['dark'])
             
-            # Buttons frame
+            # Buttons frame (now packed below treeview_frame)
             button_frame = tk.Frame(content, bg=self.colors['dark'])
             button_frame.pack(fill='x', pady=(15, 0))
             
@@ -940,12 +944,66 @@ class ModernAttendanceSystem:
                       command=lambda: self._export_student_registry(registry),
                       style='Primary.TButton').pack(side='left', padx=(0, 10))
             
+            # --- DELETE SELECTED BUTTON ---
+            ttk.Button(button_frame, text="🗑 Delete Selected", 
+                      command=lambda: self._delete_selected_students(tree, view_window),
+                      style='Danger.TButton').pack(side='left', padx=(0, 10))
+            
             ttk.Button(button_frame, text="❌ Close", 
                       command=view_window.destroy,
                       style='Danger.TButton').pack(side='right')
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load student registry: {str(e)}")
+
+    def _delete_selected_students(self, tree, view_window):
+        """Delete selected students from registry, embeddings, and model"""
+        selected_items = tree.selection()
+        if not selected_items:
+            messagebox.showinfo("No Selection", "Please select at least one student to delete.")
+            return
+        # Get selected student names
+        selected_names = [tree.item(item)['values'][0] for item in selected_items]
+        if not messagebox.askyesno("Confirm Deletion", f"Are you sure you want to delete the following student(s)?\n\n" + "\n".join(selected_names) + "\n\nThis will remove all their data and cannot be undone.", icon='warning'):
+            return
+        try:
+            # Remove from registry
+            registry_file = "student_registry.json"
+            if os.path.exists(registry_file):
+                with open(registry_file, 'r') as f:
+                    registry = json.load(f)
+            else:
+                registry = {"students": []}
+            registry["students"] = [s for s in registry["students"] if s["name"] not in selected_names]
+            with open(registry_file, 'w') as f:
+                json.dump(registry, f, indent=2)
+            # Remove from embeddings (self.X, self.Y)
+            mask = np.array([y not in selected_names for y in self.Y])
+            self.X = self.X[mask]
+            self.Y = self.Y[mask]
+            # Update encoder
+            self.encoder = LabelEncoder()
+            if len(self.Y) > 0:
+                self.encoder.fit(self.Y)
+            # Retrain or clear model
+            if len(self.X) > 0 and len(self.Y) > 0:
+                self.model = SVC(kernel='linear', probability=True)
+                self.model.fit(self.X, self.Y)
+            else:
+                self.model = None
+            # Save updated embeddings and model
+            np.savez('faces_embeddings_done_35classes.npz', self.X, self.Y)
+            with open('svm_model_160x160.pkl', 'wb') as f:
+                pickle.dump(self.model, f)
+            # Update footer and status
+            self._update_footer_student_count()
+            self._check_model_status()
+            # Refresh the view
+            messagebox.showinfo("Deletion Complete", f"✅ Selected student(s) deleted successfully.")
+            view_window.destroy()
+            self.view_registered_students()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete student(s): {str(e)}")
             
     def _export_student_registry(self, registry):
         """Export student registry to CSV"""
@@ -1118,8 +1176,26 @@ class ModernAttendanceSystem:
             if max_confidence >= confidence_threshold:
                 # Recognized face
                 try:
-                    name = self.encoder.inverse_transform(prediction)[0]
-                    self.mark_attendance(name)
+                    if prediction[0] in self.encoder.classes_:
+                        name = self.encoder.inverse_transform(prediction)[0]
+                        self.mark_attendance(name)
+                    else:
+                        name = "Unknown"
+                        # Draw unknown face styling instead
+                        cv.rectangle(frame, (x, y), (x+w, y+h), (100, 100, 255), 3)
+                        
+                        # Unknown label background
+                        label_bg_height = 35
+                        cv.rectangle(frame, (x, y-label_bg_height), (x+w, y), (100, 100, 255), -1)
+                        
+                        label = f"Unknown ({max_confidence:.1%})"
+                        cv.putText(frame, label, (x+5, y-10), cv.FONT_HERSHEY_SIMPLEX,
+                                  0.6, (255, 255, 255), 2, cv.LINE_AA)
+                                  
+                        # Unknown indicator
+                        cv.circle(frame, (x+w-15, y+15), 8, (100, 100, 255), -1)
+                        cv.putText(frame, "?", (x+w-20, y+20), cv.FONT_HERSHEY_SIMPLEX,
+                                  0.5, (255, 255, 255), 2, cv.LINE_AA)
                 except ValueError as e:
                     # Handle case where model predicts unseen label
                     print(f"⚠️ Model prediction error: {e}")
@@ -1135,7 +1211,7 @@ class ModernAttendanceSystem:
                     label = f"Unknown ({max_confidence:.1%})"
                     cv.putText(frame, label, (x+5, y-10), cv.FONT_HERSHEY_SIMPLEX,
                               0.6, (255, 255, 255), 2, cv.LINE_AA)
-                                  
+                    
                     # Unknown indicator
                     cv.circle(frame, (x+w-15, y+15), 8, (100, 100, 255), -1)
                     cv.putText(frame, "?", (x+w-20, y+20), cv.FONT_HERSHEY_SIMPLEX,
