@@ -71,7 +71,7 @@ class ModernAttendanceSystem:
         self.load_attendance_data()
         
         # Initialize GUI variables
-        self.confidence_var = tk.DoubleVar(value=0.5)  # Lower default threshold
+        self.confidence_var = tk.DoubleVar(value=0.3)  # Lowered default threshold from 0.5 to 0.3
         
         # Setup modern GUI
         self.setup_modern_gui()
@@ -1176,64 +1176,44 @@ class ModernAttendanceSystem:
             if max_confidence >= confidence_threshold:
                 # Recognized face
                 try:
-                    if prediction[0] in self.encoder.classes_:
-                        name = self.encoder.inverse_transform(prediction)[0]
-                        self.mark_attendance(name)
+                    pred = prediction[0]
+                    # If pred is a string and in encoder classes, use it directly
+                    if isinstance(pred, str) and pred in self.encoder.classes_:
+                        name = pred
                     else:
-                        name = "Unknown"
-                        # Draw unknown face styling instead
-                        cv.rectangle(frame, (x, y), (x+w, y+h), (100, 100, 255), 3)
-                        
-                        # Unknown label background
-                        label_bg_height = 35
-                        cv.rectangle(frame, (x, y-label_bg_height), (x+w, y), (100, 100, 255), -1)
-                        
-                        label = f"Unknown ({max_confidence:.1%})"
-                        cv.putText(frame, label, (x+5, y-10), cv.FONT_HERSHEY_SIMPLEX,
-                                  0.6, (255, 255, 255), 2, cv.LINE_AA)
-                                  
-                        # Unknown indicator
-                        cv.circle(frame, (x+w-15, y+15), 8, (100, 100, 255), -1)
-                        cv.putText(frame, "?", (x+w-20, y+20), cv.FONT_HERSHEY_SIMPLEX,
-                                  0.5, (255, 255, 255), 2, cv.LINE_AA)
-                except ValueError as e:
-                    # Handle case where model predicts unseen label
+                        # Otherwise, use inverse_transform
+                        name = self.encoder.inverse_transform([pred])[0]
+                    self.mark_attendance(name)
+                    # Draw modern green rectangle and label
+                    cv.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 100), 3)
+                    # Modern label background
+                    label_bg_height = 35
+                    cv.rectangle(frame, (x, y-label_bg_height), (x+w, y), (0, 255, 100), -1)
+                    # Text label
+                    label = f"{name} ({max_confidence:.1%})"
+                    cv.putText(frame, label, (x+5, y-10), cv.FONT_HERSHEY_SIMPLEX,
+                              0.6, (0, 0, 0), 2, cv.LINE_AA)
+                    # Recognition indicator
+                    cv.circle(frame, (x+w-15, y+15), 8, (0, 255, 100), -1)
+                    cv.putText(frame, "✓", (x+w-20, y+20), cv.FONT_HERSHEY_SIMPLEX,
+                              0.5, (0, 0, 0), 2, cv.LINE_AA)
+                except Exception as e:
                     print(f"⚠️ Model prediction error: {e}")
                     # Treat as unknown face
                     name = "Unknown"
                     # Draw unknown face styling instead
                     cv.rectangle(frame, (x, y), (x+w, y+h), (100, 100, 255), 3)
-                    
                     # Unknown label background
                     label_bg_height = 35
                     cv.rectangle(frame, (x, y-label_bg_height), (x+w, y), (100, 100, 255), -1)
-                    
                     label = f"Unknown ({max_confidence:.1%})"
                     cv.putText(frame, label, (x+5, y-10), cv.FONT_HERSHEY_SIMPLEX,
                               0.6, (255, 255, 255), 2, cv.LINE_AA)
-                    
                     # Unknown indicator
                     cv.circle(frame, (x+w-15, y+15), 8, (100, 100, 255), -1)
                     cv.putText(frame, "?", (x+w-20, y+20), cv.FONT_HERSHEY_SIMPLEX,
                               0.5, (255, 255, 255), 2, cv.LINE_AA)
                     continue
-                
-                # Draw modern green rectangle and label
-                cv.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 100), 3)
-                
-                # Modern label background
-                label_bg_height = 35
-                cv.rectangle(frame, (x, y-label_bg_height), (x+w, y), (0, 255, 100), -1)
-                
-                # Text label
-                label = f"{name} ({max_confidence:.1%})"
-                cv.putText(frame, label, (x+5, y-10), cv.FONT_HERSHEY_SIMPLEX,
-                          0.6, (0, 0, 0), 2, cv.LINE_AA)
-                          
-                # Recognition indicator
-                cv.circle(frame, (x+w-15, y+15), 8, (0, 255, 100), -1)
-                cv.putText(frame, "✓", (x+w-20, y+20), cv.FONT_HERSHEY_SIMPLEX,
-                          0.5, (0, 0, 0), 2, cv.LINE_AA)
             else:
                 # Unrecognized face
                 cv.rectangle(frame, (x, y), (x+w, y+h), (100, 100, 255), 3)
